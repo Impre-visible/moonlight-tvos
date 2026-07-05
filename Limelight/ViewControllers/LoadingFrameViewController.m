@@ -16,6 +16,15 @@
     [super viewDidLoad];
     // center the loading spinner
     self.loadingSpinner.center = CGPointMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2);
+
+    // Replace the flat black scrim with a system blur material so the overlay
+    // reads as glass (and adopts Liquid Glass automatically on tvOS 26).
+    UIBlurEffect* blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
+    UIVisualEffectView* blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
+    blurView.frame = self.view.bounds;
+    blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.view.backgroundColor = [UIColor clearColor];
+    [self.view insertSubview:blurView atIndex:0];
 }
 
 - (UIViewController*) activeViewController {
