@@ -23,6 +23,7 @@ static const float REFRESH_CYCLE = 1.0f;
     UIMotionEffectGroup* _parallaxGroup;
     CATransform3D _restingTransform;
     BOOL _capturedResting;
+    BOOL _showingPlayIcon;
 }
 
 static UIImage* noImage;
@@ -87,25 +88,20 @@ static UIImage* noImage;
     [self updateAppImage];
     self.backgroundColor = [UIColor clearColor];
     
-    // --- LE MOTEUR PARALLAX (L'EFFET DE FLOTTEMENT) ---
-    // 1. Mouvement horizontal (axe X)
-    UIInterpolatingMotionEffect *panX = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x" type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
-    panX.minimumRelativeValue = @(-12.0); // Bouge de 12 pixels vers la gauche
-    panX.maximumRelativeValue = @(12.0);  // Bouge de 12 pixels vers la droite
-    
-    // 2. Mouvement vertical (axe Y)
-    UIInterpolatingMotionEffect *panY = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.y" type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
-    panY.minimumRelativeValue = @(-12.0);
-    panY.maximumRelativeValue = @(12.0);
-    // --------------------------------------------------
-
     return self;
 }
 
 - (void)didMoveToSuperview {
-    // Start our update loop when we are added to our cell
     if (self.superview != nil) {
+        // Ensure only one update loop is ever pending (the view can be
+        // re-added on cell reuse, which would otherwise stack loops).
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateLoop) object:self];
         [self updateLoop];
+    }
+    else {
+        // Detached: stop the pending loop promptly instead of waiting for the
+        // next tick to notice superview == nil.
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateLoop) object:self];
     }
 }
 
@@ -159,8 +155,9 @@ static UIImage* noImage;
     
     _swiftCardView = [LiquidGlassCardBridge createCardWithTitle:_app.name image:appImage isPlaying:isPlaying];
     _swiftCardView.frame = self.bounds;
-    
+
     [self addSubview:_swiftCardView];
+    _showingPlayIcon = isPlaying;
 }
 
 - (void) buttonSelected:(id)sender {
@@ -198,9 +195,9 @@ static UIImage* noImage;
         return;
     }
     
-    // Update the app image if neccessary
-    if ((_appOverlay != nil && ![_app.id isEqualToString:_app.host.currentGame]) ||
-        (_appOverlay == nil && [_app.id isEqualToString:_app.host.currentGame])) {
+    // Update the app image only when the play state actually changes
+    BOOL isPlaying = [_app.id isEqualToString:_app.host.currentGame];
+    if (isPlaying != _showingPlayIcon) {
         [self updateAppImage];
     }
     
