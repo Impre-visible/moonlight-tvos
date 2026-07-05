@@ -28,6 +28,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     id _keyboardDisconnectObserver;
     
     NSLock *_controllerStreamLock;
+    dispatch_queue_t _inputHandlerQueue;
     NSMutableDictionary *_controllers;
     id<ControllerSupportDelegate> _delegate;
     
@@ -679,6 +680,12 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 -(void) registerControllerCallbacks:(GCController*) controller
 {
     if (controller != NULL) {
+        // Run this controller's input handlers off the main thread (see the
+        // dedicated queue created in init) so they are not blocked behind the
+        // main-run-loop video frame submission. updateFinished: and the state
+        // helpers are already thread-safe, and the only UIKit path
+        // (streamExitRequested) is already marshaled back to the main queue.
+        controller.handlerQueue = _inputHandlerQueue;
         // iOS 13 allows the Start button to behave like a normal button, however
         // older MFi controllers can send an instant down+up event for the start button
         // which means the button will not be down long enough to register on the PC.
@@ -847,6 +854,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 }
 
 -(void) registerMouseCallbacks:(GCMouse*) mouse API_AVAILABLE(ios(14.0)) {
+    mouse.handlerQueue = _inputHandlerQueue;
     mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput * _Nonnull mouse, float deltaX, float deltaY) {
         self->accumulatedDeltaX += deltaX / MOUSE_SPEED_DIVISOR;
         self->accumulatedDeltaY += -deltaY / MOUSE_SPEED_DIVISOR;
@@ -1078,6 +1086,11 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     self = [super init];
     
     _controllerStreamLock = [[NSLock alloc] init];
+    // Dedicated serial queue (highest QoS) for GameController input handlers so
+    // they run off the main thread and are not blocked behind the video frame
+    // submission on the main run loop. Serial preserves event ordering.
+    _inputHandlerQueue = dispatch_queue_create("com.moonlight.controller-input",
+        dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0));
     _controllers = [[NSMutableDictionary alloc] init];
     _controllerNumbers = 0;
     _multiController = streamConfig.multiController;
