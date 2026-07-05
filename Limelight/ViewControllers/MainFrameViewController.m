@@ -34,6 +34,7 @@
 #endif
 
 #import <VideoToolbox/VideoToolbox.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include <Limelight.h>
 
@@ -130,7 +131,7 @@ static NSMutableSet* hostList;
 
 - (void)updateTitle {
     if (_selectedHost != nil) {
-        self.title = _selectedHost.name;
+        self.title = [NSString stringWithFormat:@"Host: %@", _selectedHost.name];
     }
     else if ([hostList count] == 0) {
         self.title = @"Searching for PCs on your network...";
@@ -1427,14 +1428,54 @@ static NSMutableSet* hostList;
 }
 #endif
 
+#if TARGET_OS_TV
+static UIAppView* MFVCFindAppView(UIView* view) {
+    if (view == nil) { return nil; }
+    if ([view isKindOfClass:[UIAppView class]]) { return (UIAppView*)view; }
+    for (UIView* sub in view.subviews) {
+        UIAppView* found = MFVCFindAppView(sub);
+        if (found != nil) { return found; }
+    }
+    return nil;
+}
+#endif
+
 - (void)didUpdateFocusInContext:(UIFocusUpdateContext *)context withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
-    
-#if !TARGET_OS_TV
+#if TARGET_OS_TV
+    UIAppView* prevCard = MFVCFindAppView(context.previouslyFocusedView);
+    UIAppView* nextCard = MFVCFindAppView(context.nextFocusedView);
+    if (prevCard != nextCard) {
+        [prevCard setCardFocused:NO withCoordinator:coordinator];
+        [nextCard setCardFocused:YES withCoordinator:coordinator];
+    }
+#else
     if (context.nextFocusedView != nil) {
         [context.nextFocusedView setAlpha:0.8];
     }
     [context.previouslyFocusedView setAlpha:1.0];
 #endif
 }
+
+#if TARGET_OS_TV
+// Minimum time between accepted focus moves within the app grid (seconds).
+// Higher value = slower navigation / fewer cards traversed per trackpad swipe.
+// Tune this to taste.
+static const NSTimeInterval kFocusMoveThrottle = 0.20;
+static NSTimeInterval sLastFocusMoveTime = 0.0;
+
+- (BOOL)collectionView:(UICollectionView *)collectionView shouldUpdateFocusInContext:(UICollectionViewFocusUpdateContext *)context {
+    // Only throttle cell-to-cell moves inside the grid. Always allow focus
+    // entering or leaving the grid (e.g. to/from the navigation bar), so we
+    // never trap focus.
+    if (context.previouslyFocusedIndexPath != nil && context.nextFocusedIndexPath != nil) {
+        NSTimeInterval now = CACurrentMediaTime();
+        if (now - sLastFocusMoveTime < kFocusMoveThrottle) {
+            return NO;
+        }
+        sLastFocusMoveTime = now;
+    }
+    return YES;
+}
+#endif
 
 @end

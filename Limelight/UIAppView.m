@@ -8,6 +8,7 @@
 
 #import "UIAppView.h"
 #import "AppAssetManager.h"
+#import "Moonlight-Swift.h"
 
 static const float REFRESH_CYCLE = 1.0f;
 
@@ -18,6 +19,10 @@ static const float REFRESH_CYCLE = 1.0f;
     UIImageView* _appImage;
     NSCache* _artCache;
     id<AppCallback> _callback;
+    UIView* _swiftCardView;
+    UIMotionEffectGroup* _parallaxGroup;
+    CATransform3D _restingTransform;
+    BOOL _capturedResting;
 }
 
 static UIImage* noImage;
@@ -42,9 +47,9 @@ static UIImage* noImage;
     
     [self setAlpha:app.hidden ? 0.4 : 1.0];
     
-    _appImage = [[UIImageView alloc] initWithFrame:self.frame];
-    [_appImage setImage:noImage];
-    [self addSubview:_appImage];
+    //_appImage = [[UIImageView alloc] initWithFrame:self.frame];
+    //[_appImage setImage:noImage];
+    //[self addSubview:_appImage];
     
     // Use UIContextMenuInteraction on iOS 13.0+ and a standard UILongPressGestureRecognizer
     // for tvOS devices and iOS prior to 13.0.
@@ -66,7 +71,7 @@ static UIImage* noImage;
     [self addTarget:self action:@selector(buttonDeselected:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchCancel | UIControlEventTouchDragExit];
     
 #if TARGET_OS_TV
-    _appImage.adjustsImageWhenAncestorFocused = YES;
+    //_appImage.adjustsImageWhenAncestorFocused = YES;
 #else
     // Rasterizing the cell layer increases rendering performance by quite a bit
     // but we want it unrasterized for tvOS where it must be scaled.
@@ -80,7 +85,20 @@ static UIImage* noImage;
 #endif
     
     [self updateAppImage];
+    self.backgroundColor = [UIColor clearColor];
     
+    // --- LE MOTEUR PARALLAX (L'EFFET DE FLOTTEMENT) ---
+    // 1. Mouvement horizontal (axe X)
+    UIInterpolatingMotionEffect *panX = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x" type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
+    panX.minimumRelativeValue = @(-12.0); // Bouge de 12 pixels vers la gauche
+    panX.maximumRelativeValue = @(12.0);  // Bouge de 12 pixels vers la droite
+    
+    // 2. Mouvement vertical (axe Y)
+    UIInterpolatingMotionEffect *panY = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.y" type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
+    panY.minimumRelativeValue = @(-12.0);
+    panY.maximumRelativeValue = @(12.0);
+    // --------------------------------------------------
+
     return self;
 }
 
@@ -115,83 +133,47 @@ static UIImage* noImage;
 #endif
 
 - (void) updateAppImage {
-    if (_appOverlay != nil) {
-        [_appOverlay removeFromSuperview];
-        _appOverlay = nil;
-    }
-    if (_appLabel != nil) {
-        [_appLabel removeFromSuperview];
-        _appLabel = nil;
-    }
-    
-    BOOL noAppImage = false;
-    
-    // First check the memory cache
     UIImage* appImage = [_artCache objectForKey:_app];
     if (appImage == nil) {
-        // Next try to load from the on disk cache
         appImage = [UIImage imageWithContentsOfFile:[AppAssetManager boxArtPathForApp:_app]];
         if (appImage != nil) {
             [_artCache setObject:appImage forKey:_app];
         }
     }
     
+    // 1. LE FILTRE ANTI-FAUSSES IMAGES
     if (appImage != nil) {
-        // This size of image might be blank image received from GameStream.
-        // TODO: Improve no-app image detection
-        if (!(appImage.size.width == 130.f && appImage.size.height == 180.f) && // GFE 2.0
-            !(appImage.size.width == 628.f && appImage.size.height == 888.f)) { // GFE 3.0
-            [_appImage setImage:appImage];
-        } else {
-            noAppImage = true;
+        if ((appImage.size.width == 130.f && appImage.size.height == 180.f) ||
+            (appImage.size.width == 628.f && appImage.size.height == 888.f)) {
+            appImage = nil; // On force à nil pour déclencher le texte en Swift
         }
-    } else {
-        noAppImage = true;
     }
     
-    if ([_app.id isEqualToString:_app.host.currentGame]) {
-        // Only create the app overlay if needed
-        _appOverlay = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"Play"]];
-        _appOverlay.layer.shadowColor = [UIColor blackColor].CGColor;
-        _appOverlay.layer.shadowOffset = CGSizeMake(0, 0);
-        _appOverlay.layer.shadowOpacity = 1;
-        _appOverlay.layer.shadowRadius = 4.0;
-        _appOverlay.contentMode = UIViewContentModeScaleAspectFit;
+    BOOL isPlaying = [_app.id isEqualToString:_app.host.currentGame];
+    
+    if (_swiftCardView != nil) {
+        [_swiftCardView removeFromSuperview];
     }
     
-    if (noAppImage) {
-        _appLabel = [[UILabel alloc] init];
-        [_appLabel setTextColor:[UIColor whiteColor]];
-        [_appLabel setText:_app.name];
-        [_appLabel setFont:[UIFont systemFontOfSize:24]];
-        [_appLabel setBaselineAdjustment:UIBaselineAdjustmentAlignCenters];
-        [_appLabel setTextAlignment:NSTextAlignmentCenter];
-        [_appLabel setLineBreakMode:NSLineBreakByWordWrapping];
-        [_appLabel setNumberOfLines:0];
-    }
+    self.backgroundColor = [UIColor clearColor];
     
-    [self positionSubviews];
+    _swiftCardView = [LiquidGlassCardBridge createCardWithTitle:_app.name image:appImage isPlaying:isPlaying];
+    _swiftCardView.frame = self.bounds;
     
-#if TARGET_OS_TV
-    [_appImage.overlayContentView addSubview:_appLabel];
-    [_appImage.overlayContentView addSubview:_appOverlay];
-#else
-    [self addSubview:_appLabel];
-    [self addSubview:_appOverlay];
-#endif
+    [self addSubview:_swiftCardView];
 }
 
 - (void) buttonSelected:(id)sender {
-    _appImage.layer.opacity = 0.5f;
+    _swiftCardView.alpha = 0.5f; // On utilise la vue Swift maintenant !
 }
 - (void) buttonDeselected:(id)sender {
-    _appImage.layer.opacity = 1.0f;
+    _swiftCardView.alpha = 1.0f;
 }
 
 - (void) positionSubviews {
     CGFloat padding = 5.f;
-    CGSize frameSize = _appImage.frame.size;
-    CGPoint center = _appImage.center;
+    CGSize frameSize = self.bounds.size;
+    CGPoint center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
     
     if (_appLabel != nil) {
         if (_appOverlay != nil) {
@@ -225,7 +207,7 @@ static UIImage* noImage;
     // Show no shadow for hidden apps. Because we adjust the opacity of the
     // cells for hidden apps, it makes them look bad when the shadow draws
     // through the app tile.
-    self.superview.layer.shadowOpacity = _app.hidden ? 0.0f : 0.5f;
+    // self.superview.layer.shadowOpacity = _app.hidden ? 0.0f : 0.5f;
     
     // Update opacity if neccessary
     [self setAlpha:_app.hidden ? 0.4 : 1.0];
@@ -233,5 +215,57 @@ static UIImage* noImage;
     // Queue the next refresh cycle
     [self performSelector:@selector(updateLoop) withObject:self afterDelay:REFRESH_CYCLE];
 }
+
+- (void)setCardFocused:(BOOL)focused withCoordinator:(UIFocusAnimationCoordinator *)coordinator {
+    self.clipsToBounds = NO;
+
+    // Snapshot the resting transform exactly once, before we ever mutate it.
+    if (!_capturedResting) {
+        _restingTransform = self.layer.transform;
+        _capturedResting = YES;
+    }
+
+    if (focused) {
+        if (_parallaxGroup == nil) {
+            UIInterpolatingMotionEffect *tiltX = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"layer.transform.rotation.y" type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
+            tiltX.minimumRelativeValue = @(-0.15);
+            tiltX.maximumRelativeValue = @(0.15);
+            UIInterpolatingMotionEffect *tiltY = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"layer.transform.rotation.x" type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
+            tiltY.minimumRelativeValue = @(0.15);
+            tiltY.maximumRelativeValue = @(-0.15);
+            _parallaxGroup = [[UIMotionEffectGroup alloc] init];
+            _parallaxGroup.motionEffects = @[tiltX, tiltY];
+        }
+
+        [coordinator addCoordinatedAnimations:^{
+            CATransform3D transform = self->_restingTransform;
+            transform.m34 = -1.0 / 500.0;
+            transform = CATransform3DScale(transform, 1.15, 1.15, 1.0);
+            self.layer.transform = transform;
+
+            self.layer.shadowColor = [UIColor whiteColor].CGColor;
+            self.layer.shadowOffset = CGSizeMake(0, 0);
+            self.layer.shadowOpacity = 0.8;
+            self.layer.shadowRadius = 20.0;
+
+            self.layer.cornerRadius = 12.0;
+            self.layer.borderColor = [UIColor whiteColor].CGColor;
+            self.layer.borderWidth = 4.0;
+
+            [self addMotionEffect:self->_parallaxGroup];
+        } completion:nil];
+    } else {
+        [coordinator addCoordinatedAnimations:^{
+            self.layer.transform = self->_restingTransform;
+            self.layer.shadowOpacity = 0.0;
+            self.layer.borderWidth = 0.0;
+
+            if (self->_parallaxGroup != nil) {
+                [self removeMotionEffect:self->_parallaxGroup];
+            }
+        } completion:nil];
+    }
+}
+
 
 @end
