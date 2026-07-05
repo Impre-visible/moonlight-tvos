@@ -957,6 +957,16 @@ static NSMutableSet* hostList;
     _menuRecognizer.allowedPressTypes = [[NSArray alloc] initWithObjects:[NSNumber numberWithLong:UIPressTypeMenu], nil];
     
     self.navigationController.navigationBar.titleTextAttributes = [NSDictionary dictionaryWithObject:[UIColor whiteColor] forKey:NSForegroundColorAttributeName];
+#if TARGET_OS_TV
+    // tvOS does NOT support the UIBarAppearance API on the navigation bar: assigning
+    // standardAppearance asserts "New Bar Appearance API is not supported on this
+    // version of tvOS" at runtime, even on tvOS 26. Use legacy customization only.
+    // Clearing the opaque bar tint and marking the bar translucent lets the system
+    // render its default material (Liquid Glass on tvOS 26) rather than a flat fill.
+    UINavigationBar* navBar = self.navigationController.navigationBar;
+    navBar.barTintColor = nil;
+    navBar.translucent = YES;
+#endif
 #endif
     
     _loadingFrame = [self.storyboard instantiateViewControllerWithIdentifier:@"loadingFrame"];
@@ -1103,10 +1113,15 @@ static NSMutableSet* hostList;
     
     [self.navigationController setNavigationBarHidden:NO animated:YES];
     
-    // Hide 1px border line
+    // Hide the 1px hairline (legacy, supported on both platforms). On iOS we also
+    // force a transparent background image for the legacy look. On tvOS we must
+    // NOT set an empty background image, otherwise it suppresses the system
+    // material (Liquid Glass on tvOS 26) — there we only clear the shadow.
     UIImage* fakeImage = [[UIImage alloc] init];
     [self.navigationController.navigationBar setShadowImage:fakeImage];
+#if !TARGET_OS_TV
     [self.navigationController.navigationBar setBackgroundImage:fakeImage forBarPosition:UIBarPositionAny barMetrics:UIBarMetricsDefault];
+#endif
     
     // Check for a pending shortcut action when appearing
     [self handlePendingShortcutAction];
