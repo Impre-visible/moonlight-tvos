@@ -35,6 +35,10 @@ extern int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
     
     CADisplayLink* _displayLink;
     BOOL framePacing;
+
+#ifdef DEBUG
+    NSUInteger _longFrameCount;
+#endif
 }
 
 - (void)reinitializeDisplayLayer
@@ -118,14 +122,18 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
 {
     VIDEO_FRAME_HANDLE handle;
     PDECODE_UNIT du;
-    
+
+#ifdef DEBUG
+    CFTimeInterval __instrStart = CACurrentMediaTime();
+#endif
+
     while (LiPollNextVideoFrame(&handle, &du)) {
         LiCompleteVideoFrame(handle, DrSubmitDecodeUnit(du));
-        
+
         if (framePacing) {
             // Calculate the actual display refresh rate
             double displayRefreshRate = 1 / (_displayLink.targetTimestamp - _displayLink.timestamp);
-            
+
             // Only pace frames if the display refresh rate is >= 90% of our stream frame rate.
             // Battery saver, accessibility settings, or device thermals can cause the actual
             // refresh rate of the display to drop below the physical maximum.
@@ -138,6 +146,18 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
             }
         }
     }
+
+#ifdef DEBUG
+    // Instrumentation: the frame submit loop runs on the main thread, so a long
+    // stall here is a window during which controller input cannot be serviced.
+    // (Used to measure the benefit of decoupling input from the render thread.)
+    static const CFTimeInterval kFrameStallThresholdMs = 5.0;
+    CFTimeInterval __instrElapsedMs = (CACurrentMediaTime() - __instrStart) * 1000.0;
+    if (__instrElapsedMs > kFrameStallThresholdMs) {
+        _longFrameCount++;
+        Log(LOG_I, @"[InputLatency] main-thread frame submit stalled %.2f ms (long-frame #%lu)", __instrElapsedMs, (unsigned long)_longFrameCount);
+    }
+#endif
 }
 
 - (void)stop
